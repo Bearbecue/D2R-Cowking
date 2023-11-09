@@ -28,6 +28,7 @@ private:
 //----------------------------------------------------------------------------
 
 extern float  Noise(float t);
+static float  smoothstep(float t) { return t * t * (3.0f - 2.0f * t); }
 
 struct CRGB;
 extern CRGB   ShiftHS(const CRGB &color, int32_t hue_shift, int32_t sat_shift);

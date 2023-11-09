@@ -99,6 +99,31 @@ const int   kEEPROM_total_size = 1 + // first byte is a key == 0
 static_assert(kEEPROM_total_size == kEEPROM_col_right_addr + kEEPROM_col_rgb_size);
 
 //----------------------------------------------------------------------------
+// Color presets
+
+const int   kPresetsCount = 3;
+const CRGB  kPresetColors[kPresetsCount * 4] =
+{
+  // Preset #1: Reddish at the front, blueish at the back
+  CRGB( 50,  80, 255),  // Top
+  CRGB(190, 200,  80),  // Right
+  CRGB(255, 190,  10),  // Bottom
+  CRGB(190, 200,  80),  // Left
+
+  // Preset #2: Blue hue
+  CRGB( 10, 100, 255),  // Top
+  CRGB( 10,  80, 255),  // Right
+  CRGB( 10,  50, 255),  // Bottom
+  CRGB( 10,  80, 255),  // Left
+
+  // Preset #3: Blue, red & purple
+  CRGB(190,  50,  80),  // Top
+  CRGB(255,   0,   0),  // Right
+  CRGB(190, 190, 255),  // Bottom
+  CRGB(255,   0,   0),  // Left
+};
+
+//----------------------------------------------------------------------------
 
 void setup()
 {
@@ -212,19 +237,31 @@ void loop()
 
   FastLED.setBrightness(state_brightness);
 
-  if (state_mode == 0 || state_mode == 1)
+  if (state_mode < 5) // Normal, hue-cycle, & presets
   {
     const float   hue_speed = (state_mode == 1) ? 0.5f * state_hue_speed / 100.0f : 0.0f;
     const int32_t hue_shift_anim = int32_t(fmodf(hue_speed * et, 1.0f) * 255.0f);
     const int32_t hue_shift = (state_hue_shift + hue_shift_anim) % 256;
 
-    const CRGB  colors[4] =
+    CRGB  colors[4];
+
+    // 0 = normal, 1 = hue cycle, 2-3-4 = presets
+    if (state_mode < 2)  // Normal / Hue cycle
     {
-      ShiftHS(state_color_top, hue_shift, state_sat_shift),
-      ShiftHS(state_color_right, hue_shift, state_sat_shift),
-      ShiftHS(state_color_bot, hue_shift, state_sat_shift),
-      ShiftHS(state_color_left, hue_shift, state_sat_shift),
-    };
+      colors[0] = state_color_top;
+      colors[1] = state_color_right;
+      colors[2] = state_color_bot;
+      colors[3] = state_color_left;
+    }
+    else if (state_mode <= 4) // Preset #1-3
+    {
+      const int presetId = (state_mode - 2) * 4;
+      for (int i = 0; i < 4; i++)
+        colors[i] = kPresetColors[presetId + i];
+    }
+
+    for (int i = 0; i < 4; i++)
+      colors[i] = ShiftHS(colors[i], hue_shift, state_sat_shift);
 
     // Compute global brightness level
     const float p0 = 2.0f * state_base_speed / 100.0f;
@@ -241,15 +278,16 @@ void loop()
     {
       const int   i0 = int(fi);
       const int   i1 = (i0 + 1) % 4;
+      const float t = smoothstep(fmodf(fi, 1.0f));
       const CRGB  &c0 = colors[i0];
       const CRGB  &c1 = colors[i1];
-      const CRGB  c = c0.lerp8(c1, uint8_t(fi * 256.0f));
+      const CRGB  c = c0.lerp8(c1, uint8_t(t * 256.0f));
       const float cursor = 1.0f - fabsf((fi / 2.0f) - 1.0f);
       leds[i] = ApplyPropagationBrightness(cursor, et, p1, c);
       fi += di;
     }
   }
-  else if (state_mode == 2) // Coloration per-area
+  else if (state_mode == 5) // Debug regions
   {
     int i = 0;
     for (; i < (1*NUM_LEDS)/4; i++)
@@ -276,9 +314,9 @@ void loop()
       }
     }
 
-    if (state_mode == 3 || state_mode == 4)  // Highlight specific LED
+    if (state_mode == 6 || state_mode == 7)  // Highlight specific LED
     {
-      const unsigned int  led_to_highlight = (state_mode == 3) ? state_debug_id : (x % NUM_LEDS);
+      const unsigned int  led_to_highlight = (state_mode == 6) ? state_debug_id : (x % NUM_LEDS);
       for (int i = 0; i < NUM_LEDS; i++)
         leds[i].setRGB(255, 50, 10);
       if (led_to_highlight < NUM_LEDS)
@@ -333,13 +371,14 @@ void  WaitForWiFi(int maxMs)
     delay(500);
     Serial.print(".");
   }
-  Serial.println("");
-
+  Serial.println(".!");
+#if 0 // After some time, the UC crashes here (?!) not sure why exactly. Removing this bit of code seems to fix the issue. This is scary.
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("WiFi connected to " + wifi_ST_SSID);
     Serial.println("IP address: " + WiFi.localIP());
   }
+#endif
 }
 
 //----------------------------------------------------------------------------
@@ -501,15 +540,18 @@ static void _HandleRoot()
            "      <select id=\"mode\" name=\"mode\" onChange=\"on_mode_changed()\">\r\n"
            "        <option value=\"0\">Normal</option>\r\n"
            "        <option value=\"1\"" + String(state_mode == 1 ? " selected" : "") + ">Hue cycle</option>\r\n"
-           "        <option value=\"2\"" + String(state_mode == 2 ? " selected" : "") + ">Debug regions</option>\r\n"
+           "        <option value=\"1\"" + String(state_mode == 2 ? " selected" : "") + ">Preset #1</option>\r\n"
+           "        <option value=\"1\"" + String(state_mode == 3 ? " selected" : "") + ">Preset #2</option>\r\n"
+           "        <option value=\"1\"" + String(state_mode == 4 ? " selected" : "") + ">Preset #3</option>\r\n"
+           "        <option value=\"2\"" + String(state_mode == 5 ? " selected" : "") + ">Debug regions</option>\r\n"
 #if defined(ENABLE_DEBUG_ID)
-           "        <option value=\"3\"" + String(state_mode == 3 ? " selected" : "") + ">Debug ID</option>\r\n"
+           "        <option value=\"3\"" + String(state_mode == 6 ? " selected" : "") + ">Debug ID</option>\r\n"
 #endif
-           "        <option value=\"4\"" + String(state_mode == 4 ? " selected" : "") + ">Debug ID Cycle</option>\r\n"
-           "        <option value=\"5\"" + String(state_mode == 5 ? " selected" : "") + ">Debug RGB Cycle</option>\r\n"
+           "        <option value=\"4\"" + String(state_mode == 7 ? " selected" : "") + ">Debug ID Cycle</option>\r\n"
+           "        <option value=\"5\"" + String(state_mode == 8 ? " selected" : "") + ">Debug RGB Cycle</option>\r\n"
            "      </select>&nbsp;\r\n"
 #if defined(ENABLE_DEBUG_ID)
-           "      <input type=\"text\" id=\"did\" name=\"did\" value=\"" + String(state_debug_id) + "\" style=\"width: 40px; visibility: " + String(state_mode == 3 ? "visible" : "hidden") + ";\">\r\n"
+           "      <input type=\"text\" id=\"did\" name=\"did\" value=\"" + String(state_debug_id) + "\" style=\"width: 40px; visibility: " + String(state_mode == 6 ? "visible" : "hidden") + ";\">\r\n"
            "      <script>function on_mode_changed() {\r\n"
            "          var m = document.getElementById(\"mode\");\r\n"
            "          var id = document.getElementById(\"did\");\r\n"
@@ -669,8 +711,8 @@ static void _HandleSetCredentialsAP()
              "To reboot the device, simply power it off, then on again.<br/>\r\n"
              "<hr/>\r\n"
     			   "<font color=red><b>!!!! DANGER ZONE !!!</b><br/>\r\n"
-    			   "If you do not remember the access-point password, and you did not setup a connection to your local WiFi network, there will be no way to recover this.\r\n"
-    			   "The device will be \"bricked\" as you won't be able to connect to it from anywhere, and only re-flashing the firmware from the USB connection will fix this.</font><br/>\r\n"
+    			   "If you do not remember the access-point password, and you did not setup a connection to your local WiFi network, there will be no way to recover this.<br/>\r\n"
+    			   "The device will be \"bricked\" as you won't be able to connect to it from anywhere, and only re-flashing the firmware from the USB connector will fix this.</font><br/>\r\n"
     			   "<br/>\r\n"
     			   "<form action=\"/set_credentials_ap\">\r\n"
              "  <table>\r\n"

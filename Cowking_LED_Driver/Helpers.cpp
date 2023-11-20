@@ -8,14 +8,14 @@
 
 void  LoopTimer::tick()
 {
-  const long int  curMS = millis();
-  if (m_PrevMS < 0)
-    m_PrevMS = curMS;
+  const long int  curUS = micros();
+  if (m_PrevUS < 0)
+    m_PrevUS = curUS;
 
-  m_DtMS = (curMS > m_PrevMS) ? curMS - m_PrevMS : 10;  // by default 10 ms when wrapping around
-  m_PrevMS = curMS;
+  m_DtUS = (curUS > m_PrevUS) ? curUS - m_PrevUS : 10;  // by default 10 ms when wrapping around
+  m_PrevUS = curUS;
 
-  m_ElapsedTime += m_DtMS * 1.0e-3f;
+  m_ElapsedTime += m_DtUS * 1.0e-6f;
 }
 
 //----------------------------------------------------------------------------
@@ -70,7 +70,7 @@ float  Noise(float t)
   return sinf(t *  1.000f) * 0.400f +
          sinf(t *  3.275f) * 0.325f +
          sinf(t *  7.241f) * 0.200f +
-         sinf(t * 18.800f) * 0.075f;
+         sinf(t * 18.000f) * 0.075f;
 }
 
 //----------------------------------------------------------------------------

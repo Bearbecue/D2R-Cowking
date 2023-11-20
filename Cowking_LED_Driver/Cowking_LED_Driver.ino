@@ -21,7 +21,7 @@
 //----------------------------------------------------------------------------
 // LED count
 
-#define NUM_LEDS  43  // TODO: it would be much better if I could fit 44 on the ring.
+#define NUM_LEDS  44  // TODO: it would be much better if I could fit 44 on the ring.
 
 //----------------------------------------------------------------------------
 
@@ -55,7 +55,8 @@ int32_t     state_base_speed = 50;    // [0, 100]
 int32_t     state_base_min = 80;      // [0, 100]
 int32_t     state_hue_shift = 0;      // [0, 255]
 int32_t     state_sat_shift = 0;      // [-255, 255]
-int32_t     state_hue_speed = 50;      // [0, 100]
+int32_t     state_hue_speed = 50;     // [0, 100]
+int32_t     state_rot_speed = 50;     // [0, 100], 0=-1.0, 50=0.0, 100=1.0
 CRGB        state_color_top = CRGB(255, 255, 255);
 CRGB        state_color_bot = CRGB(255, 255, 255);
 CRGB        state_color_left = CRGB(255, 255, 255);
@@ -85,7 +86,8 @@ const int   kEEPROM_base_min_addr = kEEPROM_base_speed_addr + kEEPROM_int32_t_si
 const int   kEEPROM_hue_shift_addr = kEEPROM_base_min_addr + kEEPROM_int32_t_size;
 const int   kEEPROM_sat_shift_addr = kEEPROM_hue_shift_addr + kEEPROM_int32_t_size;
 const int   kEEPROM_hue_speed_addr = kEEPROM_sat_shift_addr + kEEPROM_int32_t_size;
-const int   kEEPROM_col_top_addr = kEEPROM_hue_speed_addr + kEEPROM_int32_t_size;
+const int   kEEPROM_rot_speed_addr = kEEPROM_hue_speed_addr + kEEPROM_int32_t_size;
+const int   kEEPROM_col_top_addr = kEEPROM_rot_speed_addr + kEEPROM_int32_t_size;
 const int   kEEPROM_col_bot_addr = kEEPROM_col_top_addr + kEEPROM_col_rgb_size;
 const int   kEEPROM_col_left_addr = kEEPROM_col_bot_addr + kEEPROM_col_rgb_size;
 const int   kEEPROM_col_right_addr = kEEPROM_col_left_addr + kEEPROM_col_rgb_size;
@@ -93,22 +95,45 @@ const int   kEEPROM_col_FIRST_addr = kEEPROM_col_top_addr;
 
 const int   kEEPROM_total_size = 1 + // first byte is a key == 0
                                  kEEPROM_ST_ssid_size + kEEPROM_ST_pass_size + kEEPROM_AP_ssid_size + kEEPROM_AP_pass_size +
-                                 kEEPROM_int32_t_size * 12 +
+                                 kEEPROM_int32_t_size * 13 +
                                  kEEPROM_col_rgb_size * 4;
 
 static_assert(kEEPROM_total_size == kEEPROM_col_right_addr + kEEPROM_col_rgb_size);
 
 //----------------------------------------------------------------------------
+
+float state_rot_frac = 0.0f;
+int   state_cur_pending_led = 0;
+bool  init_done = false;
+float last_update_time = 0.0f;
+
+//----------------------------------------------------------------------------
 // Color presets
 
-const int   kPresetsCount = 3;
-const CRGB  kPresetColors[kPresetsCount * 4] =
+struct  SPreset
+{
+  bool  m_OverrideSettings;
+  bool  m_ColorGradient;
+  float m_WaveSpeed;
+  float m_HueSpeed;
+  float m_RotationSpeed;
+};
+
+const SPreset kPresets[] =
+{
+  { false, false, 0.0f, 0.0f, 0.0f },
+  { false, false, 0.0f, 0.0f, 0.0f },
+  { false, false, 0.0f, 0.0f, 0.0f },
+};
+const int   kPresetsCount = sizeof(kPresets) / sizeof(kPresets[0]);
+
+const CRGB  kPresetColors[] =
 {
   // Preset #1: Reddish at the front, blueish at the back
   CRGB( 50,  80, 255),  // Top
-  CRGB(190, 200,  80),  // Right
-  CRGB(255, 190,  10),  // Bottom
-  CRGB(190, 200,  80),  // Left
+  CRGB(255, 100,  60),  // Right
+  CRGB(255,  60,   0),  // Bottom
+  CRGB(255, 100,  60),  // Left
 
   // Preset #2: Blue hue
   CRGB( 10, 100, 255),  // Top
@@ -122,24 +147,48 @@ const CRGB  kPresetColors[kPresetsCount * 4] =
   CRGB(190, 190, 255),  // Bottom
   CRGB(255,   0,   0),  // Left
 };
+static_assert(sizeof(kPresetColors) / sizeof(kPresetColors[0]) == kPresetsCount * 4);
+
+//----------------------------------------------------------------------------
+// Display rotating lights during initialization, to have visual progress feedback
+// while connecting to WiFi. Each time this is called, rotates the lights by 1 slot
+
+void  UpdatePendingDisplay()
+{
+  if (init_done)
+    return;
+
+  for (int i = 0; i < NUM_LEDS; i++)
+    leds[i].setRGB(5, 1, 1);
+
+  const int kDotCount = 3;
+  for (int i = 0; i < kDotCount; i++)
+    leds[(state_cur_pending_led + (NUM_LEDS * i) / kDotCount) % NUM_LEDS].setRGB(10, 10, 100);
+
+  FastLED.show();
+
+  state_cur_pending_led = (state_cur_pending_led + 1) % NUM_LEDS;
+}
 
 //----------------------------------------------------------------------------
 
 void setup()
 {
-//  setCpuFrequencyMhz(160);
+  // Force-set frequency to 80 MHz instead of 240 MHz: No need for the high freq, and module heats-up less @ 80
+  setCpuFrequencyMhz(80);
 
+  // Setup LEDs
   pinMode(PIN_OUT_WS2812, OUTPUT);
 
   for (int i = 0; i < NUM_LEDS; i++)
     leds[i].setRGB(0, 0, 0);
 
-  // Setup LED strip
   FastLED.addLeds<WS2812, PIN_OUT_WS2812, GRB>(leds, NUM_LEDS);  // The WS2812 strip I got from aliexpress has red and green swapped, so GRB instead of RGB
   FastLED.setMaxPowerInVoltsAndMilliamps(5, 2000);  // 5V, 2A
   FastLED.setBrightness(255);
   FastLED.clear();
   FastLED.show();
+  UpdatePendingDisplay();
 
   Serial.begin(115200);
   Serial.println();
@@ -148,7 +197,7 @@ void setup()
 
   // Init baselines
   chipId = 0;
-  for(int i=0; i<17; i=i+8)
+  for(int i = 0; i < 17; i += 8)
     chipId |= ((ESP.getEfuseMac() >> (40 - i)) & 0xff) << i;
   Serial.printf("ESP32 Chip model = %s Rev %d\n", ESP.getChipModel(), ESP.getChipRevision());
   Serial.printf("This chip has %d cores\n", ESP.getChipCores());
@@ -171,18 +220,26 @@ void setup()
   ESP32Flash_Init();
   ESP32Flash_ReadServerInfo();
 
+  UpdatePendingDisplay();
+
   // Setup wifi in both access-point & station mode:
   SetupServer();
+
+  UpdatePendingDisplay();
 
   // Try to connect to the wifi network
   ConnectToWiFi();
 
-  WaitForWiFi(2000);  // Wait at most 2 seconds for wifi
+  UpdatePendingDisplay();
+
+  WaitForWiFi(5000);  // Wait at most 5 seconds for wifi
+
+  init_done = true;
 }
 
 //----------------------------------------------------------------------------
 
-static CRGB ApplyPropagationBrightness(float cursor, float et, float p0, const CRGB &base)
+static float  GetPropagationBrightness(float cursor, float et, float p0)
 {
   const float p1 = 4.0f * (state_wave_tiling / 100.0f);  // period of cursor offset, increase this to make the noise "tile" more across space
   const float bMin = state_wave_min / 100.0f;
@@ -210,6 +267,14 @@ static CRGB ApplyPropagationBrightness(float cursor, float et, float p0, const C
       break;
   }
 #endif
+  return intensity;
+}
+
+//----------------------------------------------------------------------------
+
+static CRGB ApplyPropagationBrightness(float cursor, float et, float p0, const CRGB &base)
+{
+  const float intensity = GetPropagationBrightness(cursor, et, p0);
   return CRGB(int32_t(base.r * intensity),
               int32_t(base.g * intensity),
               int32_t(base.b * intensity));
@@ -226,23 +291,20 @@ void loop()
 
   const float   dt = loopTimer.dt();
   const float   et = loopTimer.elapsedTime();
+  const int32_t frame_start_us = micros();
 
-  // What to configure:
-  // - Mode: 0=normal, 1=hue cycle, 2=debug zones, 3=debug ID, 4=debug ID cycle, 5=debug RGB cycle
-  // - overall hue shift
-  // - 5 inner colors
-  // - 2 eye colors
-  // - animation speed (main)
-  // - animation speed (eyes)
+  // Update LED animations
 
   FastLED.setBrightness(state_brightness);
 
   if (state_mode < 5) // Normal, hue-cycle, & presets
   {
-    const float   hue_speed = (state_mode == 1) ? 0.5f * state_hue_speed / 100.0f : 0.0f;
-    const int32_t hue_shift_anim = int32_t(fmodf(hue_speed * et, 1.0f) * 255.0f);
-    const int32_t hue_shift = (state_hue_shift + hue_shift_anim) % 256;
-
+    float rot_speed_raw = (state_rot_speed / 100.0f) - 0.5f;
+    float rot_speed = 4.0f * rot_speed_raw * rot_speed_raw * sign(rot_speed_raw);
+    float hue_speed = 0.5f * state_hue_speed / 100.0f;
+    float base_speed = state_base_speed;
+    float wave_speed = state_wave_speed;
+    bool  colorGradient = (state_mode == 1);
     CRGB  colors[4];
 
     // 0 = normal, 1 = hue cycle, 2-3-4 = presets
@@ -255,36 +317,75 @@ void loop()
     }
     else if (state_mode <= 4) // Preset #1-3
     {
-      const int presetId = (state_mode - 2) * 4;
+      const int presetId = (state_mode - 2);
       for (int i = 0; i < 4; i++)
-        colors[i] = kPresetColors[presetId + i];
+        colors[i] = kPresetColors[presetId * 4 + i];
+
+      if (kPresets[presetId].m_OverrideSettings)
+      {
+        colorGradient = kPresets[presetId].m_ColorGradient;
+        wave_speed = kPresets[presetId].m_WaveSpeed; 
+        hue_speed = kPresets[presetId].m_HueSpeed;
+        rot_speed = kPresets[presetId].m_RotationSpeed;
+      }
     }
+
+    const int32_t hue_shift_anim = int32_t(fmodf(hue_speed * et, 1.0f) * 255.0f);
+    const int32_t hue_shift = (state_hue_shift + hue_shift_anim) % 256;
 
     for (int i = 0; i < 4; i++)
       colors[i] = ShiftHS(colors[i], hue_shift, state_sat_shift);
 
     // Compute global brightness level
-    const float p0 = 2.0f * state_base_speed / 100.0f;
-    const float p1 = 2.0f * state_wave_speed / 100.0f;
+    const float p0 = 2.0f * base_speed / 100.0f;
+    const float p1 = 2.0f * wave_speed / 100.0f;
     const float bMin = state_base_min / 100.0f;
     const float bMax = 1.0f;
     const float noise01 = Noise(et * p0) * 0.5f + 0.5f;                           // remap from [-1, 1] to [0, 1]
     const float intensity_01 = clamp(noise01 * (bMax - bMin) + bMin, 0.0f, 1.0f); // remap from [0, 1] to [bMin, bMax]
     FastLED.setBrightness(int32_t(state_brightness * intensity_01));
 
-    const float di = 4.0f / NUM_LEDS;
-    float       fi = 0.0f;
-    for (int i = 0; i < NUM_LEDS; i++)
+    if (rot_speed == 0.0f)
+      state_rot_frac = 0.0f;
+    else
     {
-      const int   i0 = int(fi);
-      const int   i1 = (i0 + 1) % 4;
-      const float t = smoothstep(fmodf(fi, 1.0f));
-      const CRGB  &c0 = colors[i0];
-      const CRGB  &c1 = colors[i1];
-      const CRGB  c = c0.lerp8(c1, uint8_t(t * 256.0f));
-      const float cursor = 1.0f - fabsf((fi / 2.0f) - 1.0f);
-      leds[i] = ApplyPropagationBrightness(cursor, et, p1, c);
-      fi += di;
+      state_rot_frac = fmodf(state_rot_frac + rot_speed * dt, 1.0f);
+      if (state_rot_frac < 0.0f)
+        state_rot_frac += 1.0f;
+    }
+
+    if (colorGradient)
+    {
+      const float di = 4.0f / NUM_LEDS;
+      float       fi = 4.0f * state_rot_frac;
+      for (int i = 0; i < NUM_LEDS; i++)
+      {
+        const float cursor = 1.0f - fabsf((fi / 2.0f) - 1.0f);
+        const float t = GetPropagationBrightness(cursor, et, p1);
+        leds[i] = colors[0].lerp8(colors[2], uint8_t(t * 255.0f));  // Lerp between top & bottom
+        fi += di;
+        if (fi > 4)
+          fi -= 4.0f;
+      }
+    }
+    else
+    {
+      const float di = 4.0f / NUM_LEDS;
+      float       fi = 4.0f * state_rot_frac;
+      for (int i = 0; i < NUM_LEDS; i++)
+      {
+        const int   i0 = int(fi);
+        const int   i1 = (i0 + 1) % 4;
+        const float t = smoothstep(fi - i0);
+        const CRGB  &c0 = colors[i0];
+        const CRGB  &c1 = colors[i1];
+        const CRGB  c = c0.lerp8(c1, uint8_t(t * 255.0f));
+        const float cursor = 1.0f - fabsf((fi / 2.0f) - 1.0f);
+        leds[i] = ApplyPropagationBrightness(cursor, et, p1, c);
+        fi += di;
+        if (fi > 4)
+          fi -= 4.0f;
+      }
     }
   }
   else if (state_mode == 5) // Debug regions
@@ -299,7 +400,7 @@ void loop()
     for (; i < (4*NUM_LEDS)/4; i++)
       leds[i] = CRGB(80, 255, 10);
   }
-  else
+  else  // All the other debug displays
   {
     // Increase 'x' counter every 0.2 seconds to animate the debug modes:
     static int    x = 0;
@@ -337,6 +438,9 @@ void loop()
 
   FastLED.show();
 
+  const int32_t frame_end_us = micros();
+  last_update_time = (frame_end_us - frame_start_us) * 1.0e-6f;
+
   delay(20);
 }
 
@@ -363,22 +467,23 @@ void  WaitForWiFi(int maxMs)
   if (!has_wifi_credentials)  // Nothing to wait on if we don't have any credentials
     return;
 
-  const int kMsPerRetry = 500;
+  const int kMsPerRetry = 100;
   int retries = max(maxMs / kMsPerRetry, 1);
   Serial.print("Waiting for Wifi connection");
   while (WiFi.status() != WL_CONNECTED && retries-- > 0)
   {
-    delay(500);
+    delay(kMsPerRetry);
+    UpdatePendingDisplay();
     Serial.print(".");
   }
-  Serial.println(".!");
-#if 0 // After some time, the UC crashes here (?!) not sure why exactly. Removing this bit of code seems to fix the issue. This is scary.
+  UpdatePendingDisplay();
+  Serial.println(".");
+
   if (WiFi.status() == WL_CONNECTED)
   {
     Serial.println("WiFi connected to " + wifi_ST_SSID);
-    Serial.println("IP address: " + WiFi.localIP());
+    Serial.println("IP address: " + WiFi.localIP().toString());
   }
-#endif
 }
 
 //----------------------------------------------------------------------------
@@ -456,7 +561,7 @@ static String  _BuildStandardResponsePage(const String &contents)
            "td.code { font-family: Consolas, Courier; }\r\n"
            "td.header { color: #AAA; background-color: #505050; }\r\n"
            ".code { font-family: Consolas, Courier; background:#EEE; }\r\n"
-           "</style></head><body>\r\n"
+           "</style><title>" + wifi_AP_SSID + ": " + WiFi.localIP().toString() + "</title></head><body>\r\n"
            "<h1>" + wifi_AP_SSID + "</h1>\r\n"
            "<hr/>\r\n";
   reply += contents;
@@ -470,6 +575,7 @@ static String  _BuildStandardResponsePage(const String &contents)
            "Chip ID: " FONT_OTAG_CODE;
   reply += String(chipId, HEX);
   reply += "</font><br/>\r\n";
+  reply += "Frame time: " FONT_OTAG_CODE + String(last_update_time * 1.0e+3f, 2) + " ms</font><br/>\r\n";
   reply += "MAC Address: " FONT_OTAG_CODE + WiFi.macAddress() + "</font><br/>\r\n";
   reply += "CPU Frequency: " FONT_OTAG_CODE + String(getCpuFrequencyMhz()) + " MHz</font><br/>\r\n";
   reply += "APB Frequency: " FONT_OTAG_CODE + String(int32_t(getApbFrequency() / 1.0e+6f)) + " MHz</font><br/>\r\n";
@@ -481,9 +587,9 @@ static String  _BuildStandardResponsePage(const String &contents)
              "IP Address: " FONT_OTAG_CODE;
     reply += WiFi.localIP().toString();
     reply += "</font><br/>\r\n"
-             "Signal strength: ";
+             "Signal strength: " FONT_OTAG_CODE;
     reply += WiFi.RSSI();
-    reply += " dB<br/>\r\n";
+    reply += " dB</font><br/>\r\n";
   }
 
   reply += "</body></html>\r\n";
@@ -539,16 +645,16 @@ static void _HandleRoot()
            "    <td>\r\n"
            "      <select id=\"mode\" name=\"mode\" onChange=\"on_mode_changed()\">\r\n"
            "        <option value=\"0\">Normal</option>\r\n"
-           "        <option value=\"1\"" + String(state_mode == 1 ? " selected" : "") + ">Hue cycle</option>\r\n"
-           "        <option value=\"1\"" + String(state_mode == 2 ? " selected" : "") + ">Preset #1</option>\r\n"
-           "        <option value=\"1\"" + String(state_mode == 3 ? " selected" : "") + ">Preset #2</option>\r\n"
-           "        <option value=\"1\"" + String(state_mode == 4 ? " selected" : "") + ">Preset #3</option>\r\n"
-           "        <option value=\"2\"" + String(state_mode == 5 ? " selected" : "") + ">Debug regions</option>\r\n"
+           "        <option value=\"1\"" + String(state_mode == 1 ? " selected" : "") + ">Color Gradient</option>\r\n"
+           "        <option value=\"2\"" + String(state_mode == 2 ? " selected" : "") + ">Preset #1</option>\r\n"
+           "        <option value=\"3\"" + String(state_mode == 3 ? " selected" : "") + ">Preset #2</option>\r\n"
+           "        <option value=\"4\"" + String(state_mode == 4 ? " selected" : "") + ">Preset #3</option>\r\n"
+           "        <option value=\"5\"" + String(state_mode == 5 ? " selected" : "") + ">Debug regions</option>\r\n"
 #if defined(ENABLE_DEBUG_ID)
-           "        <option value=\"3\"" + String(state_mode == 6 ? " selected" : "") + ">Debug ID</option>\r\n"
+           "        <option value=\"6\"" + String(state_mode == 6 ? " selected" : "") + ">Debug ID</option>\r\n"
 #endif
-           "        <option value=\"4\"" + String(state_mode == 7 ? " selected" : "") + ">Debug ID Cycle</option>\r\n"
-           "        <option value=\"5\"" + String(state_mode == 8 ? " selected" : "") + ">Debug RGB Cycle</option>\r\n"
+           "        <option value=\"7\"" + String(state_mode == 7 ? " selected" : "") + ">Debug ID Cycle</option>\r\n"
+           "        <option value=\"8\"" + String(state_mode == 8 ? " selected" : "") + ">Debug RGB Cycle</option>\r\n"
            "      </select>&nbsp;\r\n"
 #if defined(ENABLE_DEBUG_ID)
            "      <input type=\"text\" id=\"did\" name=\"did\" value=\"" + String(state_debug_id) + "\" style=\"width: 40px; visibility: " + String(state_mode == 6 ? "visible" : "hidden") + ";\">\r\n"
@@ -582,6 +688,7 @@ static void _HandleRoot()
            FORM_SLIDER("bspeed", "Base anim speed", "0", "100", String(state_base_speed))
            FORM_SLIDER("bmin", "Base min intensity", "0", "100", String(state_base_min))
            FORM_SLIDER("hspeed", "Hue shift speed", "0", "100", String(state_hue_speed))
+           FORM_SLIDER_RST("rspeed", "Rotation speed", "0", "100", String(state_rot_speed), "50")
            "  <tr>\r\n"
            "    <td colspan=2><input type=\"submit\" value=\"Submit\" id=\"submit\"/>&nbsp;<span class=\"statusCtrl\"></span></td>\r\n"
            "  </tr>\r\n"
@@ -792,6 +899,8 @@ static void _HandleConfigure()
        state_hue_shift = argInt;
     else if (argName == "hspeed")
        state_hue_speed = argInt;
+    else if (argName == "rspeed")
+       state_rot_speed = argInt;
     else if (argName == "col_top_r")  // Top
        state_color_top.r = argInt;
     else if (argName == "col_top_g")
@@ -884,6 +993,7 @@ void  ESP32Flash_Init()
     EEPROM.put(kEEPROM_base_speed_addr, int32_t(50));
     EEPROM.put(kEEPROM_base_min_addr, int32_t(80));
     EEPROM.put(kEEPROM_hue_speed_addr, int32_t(50));
+    EEPROM.put(kEEPROM_rot_speed_addr, int32_t(50));
 
     EEPROM.commit();
   }
@@ -937,6 +1047,7 @@ void  ESP32Flash_WriteServerInfo()
   EEPROM.put(kEEPROM_hue_shift_addr, state_hue_shift);
   EEPROM.put(kEEPROM_sat_shift_addr, state_sat_shift);
   EEPROM.put(kEEPROM_hue_speed_addr, state_hue_speed);
+  EEPROM.put(kEEPROM_rot_speed_addr, state_rot_speed);
 
   static_assert(sizeof(state_color_top.r) == 1);
   EEPROM.put(kEEPROM_col_top_addr + 0, state_color_top.r);
@@ -999,6 +1110,7 @@ void  ESP32Flash_ReadServerInfo()
   EEPROM.get(kEEPROM_hue_shift_addr, state_hue_shift);
   EEPROM.get(kEEPROM_sat_shift_addr, state_sat_shift);
   EEPROM.get(kEEPROM_hue_speed_addr, state_hue_speed);
+  EEPROM.get(kEEPROM_rot_speed_addr, state_rot_speed);
   static_assert(sizeof(state_color_top.r) == 1);
   EEPROM.get(kEEPROM_col_top_addr + 0, state_color_top.r);
   EEPROM.get(kEEPROM_col_top_addr + 1, state_color_top.g);

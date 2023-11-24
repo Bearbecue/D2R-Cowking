@@ -11,6 +11,7 @@
 #include <WebServer.h>
 #include <EEPROM.h>
 #include <uptime_formatter.h>
+#include <time.h>
 
 #include "HWPinConfig.h"
 #include "Helpers.h"
@@ -233,6 +234,12 @@ void setup()
   UpdatePendingDisplay();
 
   WaitForWiFi(5000);  // Wait at most 5 seconds for wifi
+
+  // Setup NTP
+  const int   gmtOffset_secs = 3600;  // France: UTC+1
+  const int   daylightSavings_secs = 3600;
+  const char  *ntpServer = "pool.ntp.org";
+  configTime(gmtOffset_secs, daylightSavings_secs, ntpServer);
 
   init_done = true;
 }
@@ -566,31 +573,39 @@ static String  _BuildStandardResponsePage(const String &contents)
            "<hr/>\r\n";
   reply += contents;
   reply += "<hr/>\r\n"
-           "Uptime: ";
-  reply += uptime_formatter::getUptime();
-  reply += "<br/>\r\n"
-           "Requests since startup: ";
-  reply += ++reqId;
-  reply += "<br/>\r\n"
-           "Chip ID: " FONT_OTAG_CODE;
-  reply += String(chipId, HEX);
-  reply += "</font><br/>\r\n";
-  reply += "Frame time: " FONT_OTAG_CODE + String(last_update_time * 1.0e+3f, 2) + " ms</font><br/>\r\n";
+           "Uptime: " + uptime_formatter::getUptime() + "<br/>\r\n";
+  reply += "Requests since startup: " + String(++reqId) + "<br/>\r\n";
+  reply += "Frame time: " FONT_OTAG_CODE + String(last_update_time * 1.0e+3f, 2) + " ms</font> "
+           "(" FONT_OTAG_CODE + String(loopTimer.dt() * 1.0e+3f, 2) + " ms</font> total)<br/>\r\n";
+
+  if (WiFi.status() == WL_CONNECTED)
+  {
+    reply += "IP Address: " FONT_OTAG_CODE +  WiFi.localIP().toString() + "</font><br/>\r\n";
+    reply += "WiFi signal strength: " FONT_OTAG_CODE + String(WiFi.RSSI()) + " dB</font><br/>\r\n";
+  }
+
+  // Print NTP time. 'getLocalTime' handles keeping track of the time even when the connection is lost.
+  // Will fail on boot if no connection can be made
+  {
+    struct tm timeinfo;
+    if (!getLocalTime(&timeinfo))
+      reply += "Date: Failed NTP fetch";
+    else
+    {
+      char  dateBuf[32];  // 21 required: 0000/00/00, 00:00:00
+      sprintf(dateBuf, "%d/%02d/%02d, %02d:%02d:%02d", 1900 + timeinfo.tm_year, 1 + timeinfo.tm_mon, timeinfo.tm_mday, timeinfo.tm_hour, timeinfo.tm_min, timeinfo.tm_sec);
+      reply += "Date: " FONT_OTAG_CODE;
+      reply += dateBuf;
+      reply += "</font><br/>\r\n";
+    }
+  }
+
+  reply += "<br/>\r\n";
+  reply += "Chip ID: " FONT_OTAG_CODE + String(chipId, HEX) + "</font><br/>\r\n";
   reply += "MAC Address: " FONT_OTAG_CODE + WiFi.macAddress() + "</font><br/>\r\n";
   reply += "CPU Frequency: " FONT_OTAG_CODE + String(getCpuFrequencyMhz()) + " MHz</font><br/>\r\n";
   reply += "APB Frequency: " FONT_OTAG_CODE + String(int32_t(getApbFrequency() / 1.0e+6f)) + " MHz</font><br/>\r\n";
   reply += "XTAL Frequency: " FONT_OTAG_CODE + String(getXtalFrequencyMhz()) + " MHz</font>";
-
-  if (WiFi.status() == WL_CONNECTED)
-  {
-    reply += "<br/>\r\n"
-             "IP Address: " FONT_OTAG_CODE;
-    reply += WiFi.localIP().toString();
-    reply += "</font><br/>\r\n"
-             "Signal strength: " FONT_OTAG_CODE;
-    reply += WiFi.RSSI();
-    reply += " dB</font><br/>\r\n";
-  }
 
   reply += "</body></html>\r\n";
   return reply;

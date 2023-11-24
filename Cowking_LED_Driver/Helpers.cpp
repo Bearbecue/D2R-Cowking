@@ -8,11 +8,17 @@
 
 void  LoopTimer::tick()
 {
-  const long int  curUS = micros();
+  const unsigned long  curUS = micros();
   if (m_PrevUS < 0)
     m_PrevUS = curUS;
 
-  m_DtUS = (curUS > m_PrevUS) ? curUS - m_PrevUS : 10;  // by default 10 ms when wrapping around
+  // Assume we'll never do more than an entire wrap in a single tick
+  // this would happen if the time between two ticks gets longer than 1 hour 11 minutes
+  // Safe to assume it won't...
+  m_DtUS = curUS - m_PrevUS;
+  if (curUS > m_PrevUS) // micros timer wrapper around.
+    m_DtUS -= 1;  // handle wrapping around: (((unsigned long)-1) - m_PrevUS) + curUS)
+
   m_PrevUS = curUS;
 
   m_ElapsedTime += m_DtUS * 1.0e-6f;

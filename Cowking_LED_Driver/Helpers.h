@@ -16,17 +16,17 @@ static inline _T sign(_T v) { return v < 0 ? -1 : 1; }
 class LoopTimer
 {
 public:
-  void      tick();
+  void          tick();
 
-  int       dtMS() const { return m_DtUS * 1000; }
-  int       dtUS() const { return m_DtUS; }
-  float     dt() const { return m_DtUS * 1.0e-6f; }
-  float     elapsedTime() const { return (float)m_ElapsedTime; }
+  unsigned long dtMS() const { return m_DtUS * 1000; }
+  unsigned long dtUS() const { return m_DtUS; }
+  float         dt() const { return m_DtUS * 1.0e-6f; }
+  float         elapsedTime() const { return (float)m_ElapsedTime; }
 
 private:
-  int       m_DtUS = 0;
-  long int  m_PrevUS = -1;
-  double    m_ElapsedTime = 0;
+  unsigned long m_DtUS = 0;
+  unsigned long m_PrevUS = -1;
+  double        m_ElapsedTime = 0;
 };
 
 //----------------------------------------------------------------------------

@@ -21,7 +21,7 @@ void  LoopTimer::tick()
 
   m_PrevUS = curUS;
 
-  m_ElapsedTime += m_DtUS * 1.0e-6f;
+  m_ElapsedTime += m_DtUS * 1.0e-6;
 }
 
 //----------------------------------------------------------------------------
@@ -74,9 +74,19 @@ CRGB  ShiftHS(const CRGB &color, int32_t hue_shift, int32_t sat_shift)
 float  Noise(float t)
 {
   return sinf(t *  1.000f) * 0.400f +
-         sinf(t *  3.275f) * 0.325f +
-         sinf(t *  7.241f) * 0.200f +
-         sinf(t * 18.000f) * 0.075f;
+         sinf(t *  3.200f) * 0.325f +
+         sinf(t *  7.200f) * 0.200f +
+         sinf(t * 17.800f) * 0.075f;
+}
+
+//----------------------------------------------------------------------------
+
+float  NoisePeriod()
+{
+  // Time weights = 1.0, 3.2, 7.2, 17.8
+  // Common period = 12816
+  // 12816 * (2.pi) = 80525.303f
+  return 80525.303f;  // Noise repeats itself every ~22h and 22 minutes if 't' is in seconds
 }
 
 //----------------------------------------------------------------------------

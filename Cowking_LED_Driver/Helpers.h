@@ -21,7 +21,7 @@ public:
   unsigned long dtMS() const { return m_DtUS * 1000; }
   unsigned long dtUS() const { return m_DtUS; }
   float         dt() const { return m_DtUS * 1.0e-6f; }
-  float         elapsedTime() const { return (float)m_ElapsedTime; }
+  double        elapsedTime() const { return m_ElapsedTime; }
 
 private:
   unsigned long m_DtUS = 0;
@@ -32,6 +32,7 @@ private:
 //----------------------------------------------------------------------------
 
 extern float  Noise(float t);
+extern float  NoisePeriod();
 static float  smoothstep(float t) { return t * t * (3.0f - 2.0f * t); }
 
 struct CRGB;

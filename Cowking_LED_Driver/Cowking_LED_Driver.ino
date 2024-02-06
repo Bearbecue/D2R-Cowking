@@ -297,7 +297,7 @@ void loop()
   WifiServerLoop();
 
   const float   dt = loopTimer.dt();
-  const float   et = loopTimer.elapsedTime();
+  const float   et = fmod(loopTimer.elapsedTime(), 10000.0);  // gore: wrap timer to avoid precision loss (we should use NoisePeriod() instead to "properly" compute the wrap periods, but in practise this will be good enough)
   const int32_t frame_start_us = micros();
 
   // Update LED animations
@@ -606,6 +606,7 @@ static String  _BuildStandardResponsePage(const String &contents)
   reply += "CPU Frequency: " FONT_OTAG_CODE + String(getCpuFrequencyMhz()) + " MHz</font><br/>\r\n";
   reply += "APB Frequency: " FONT_OTAG_CODE + String(int32_t(getApbFrequency() / 1.0e+6f)) + " MHz</font><br/>\r\n";
   reply += "XTAL Frequency: " FONT_OTAG_CODE + String(getXtalFrequencyMhz()) + " MHz</font>";
+  reply += "Build: " FONT_OTAG_CODE + String(__TIMESTAMP__) + "</font>";
 
   reply += "</body></html>\r\n";
   return reply;
@@ -644,8 +645,9 @@ static String  _BuildStandardResponsePage(const String &contents)
     "    <td><label for=\"" __name "_r\">" __title ":</label></td>\r\n" \
     "    <td><input type=\"text\" id=\"" __name "_r\" name=\"" __name "_r\" value=\"" + __value_r + "\" style=\"width:50px\"/>\r\n" \
     "        <input type=\"text\" id=\"" __name "_g\" name=\"" __name "_g\" value=\"" + __value_g + "\" style=\"width:50px\"/>\r\n" \
-    "        <input type=\"text\" id=\"" __name "_b\" name=\"" __name "_b\" value=\"" + __value_b + "\" style=\"width:50px\"/></td>\r\n" \
-    "  </tr><tr>\r\n"
+    "        <input type=\"text\" id=\"" __name "_b\" name=\"" __name "_b\" value=\"" + __value_b + "\" style=\"width:50px\"/>\r\n" \
+    "    </td>\r\n" \
+    "  </tr>\r\n"
 
 //----------------------------------------------------------------------------
 

@@ -18,6 +18,7 @@
 
 //#define ENABLE_DEBUG_ID
 #define HARWARE_NAME  "Cowking"
+#define BUILD_VERSION "1.0"
 
 //----------------------------------------------------------------------------
 // LED count
@@ -103,10 +104,11 @@ static_assert(kEEPROM_total_size == kEEPROM_col_right_addr + kEEPROM_col_rgb_siz
 
 //----------------------------------------------------------------------------
 
-float state_rot_frac = 0.0f;
-int   state_cur_pending_led = 0;
-bool  init_done = false;
-float last_update_time = 0.0f;
+float     state_rot_frac = 0.0f;
+int       state_cur_pending_led = 0;
+bool      init_done = false;
+float     last_update_time = 0.0f;
+uint32_t  web_requests = 0;
 
 //----------------------------------------------------------------------------
 // Color presets
@@ -558,7 +560,6 @@ void  WifiServerLoop()
 
 static String  _BuildStandardResponsePage(const String &contents)
 {
-  static uint32_t reqId = 0;
   String reply;
   reply += "<!DOCTYPE HTML>\r\n"
            "<html><head><style>\r\n"
@@ -574,7 +575,7 @@ static String  _BuildStandardResponsePage(const String &contents)
   reply += contents;
   reply += "<hr/>\r\n"
            "Uptime: " + uptime_formatter::getUptime() + "<br/>\r\n";
-  reply += "Requests since startup: " + String(++reqId) + "<br/>\r\n";
+  reply += "Requests since startup: " + String(web_requests) + "<br/>\r\n";
   reply += "Frame time: " FONT_OTAG_CODE + String(last_update_time * 1.0e+3f, 2) + " ms</font> "
            "(" FONT_OTAG_CODE + String(loopTimer.dt() * 1.0e+3f, 2) + " ms</font> total)<br/>\r\n";
 
@@ -606,7 +607,7 @@ static String  _BuildStandardResponsePage(const String &contents)
   reply += "CPU Frequency: " FONT_OTAG_CODE + String(getCpuFrequencyMhz()) + " MHz</font><br/>\r\n";
   reply += "APB Frequency: " FONT_OTAG_CODE + String(int32_t(getApbFrequency() / 1.0e+6f)) + " MHz</font><br/>\r\n";
   reply += "XTAL Frequency: " FONT_OTAG_CODE + String(getXtalFrequencyMhz()) + " MHz</font>";
-  reply += "Build: " FONT_OTAG_CODE + String(__TIMESTAMP__) + "</font>";
+  reply += "Build: " FONT_OTAG_CODE BUILD_VERSION ", " + String(__TIMESTAMP__) + "</font>";
 
   reply += "</body></html>\r\n";
   return reply;
@@ -653,6 +654,7 @@ static String  _BuildStandardResponsePage(const String &contents)
 
 static void _HandleRoot()
 {
+  ++web_requests;
   String  reply;
   reply += "<h2>Configure lighting:</h2>\r\n"
            "<form action=\"/configure\" id=\"configForm\">\r\n"
@@ -758,6 +760,7 @@ static void _HandleRoot()
 
 static void _HandleNotFound()
 {
+  ++web_requests;
   String reply;
   reply += "Unhandled Request\n\n";
   reply += "URI: ";
@@ -778,6 +781,7 @@ static void _HandleSetCredentials()
 {
   // Expected format:
   // /set_credentials?ssid=WifiName&passwd=WifiPassword
+  ++web_requests;
 
   String    ssid;
   String    pass;
@@ -809,6 +813,7 @@ static void _HandleSetCredentialsAP()
 {
   // Expected format:
   // /set_credentials_ap?ssid=WifiName&passwd=WifiPassword
+  ++web_requests;
 
   String    ssid;
   String    pass;
@@ -888,6 +893,7 @@ static void _HandleSetCredentialsAP()
 
 static void _HandleConfigure()
 {
+  ++web_requests;
   for (uint8_t i = 0; i < server.args(); i++)
   {
     const String  argName = server.argName(i);
